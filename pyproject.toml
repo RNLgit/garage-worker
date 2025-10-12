@@ -24,6 +24,10 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
 ]
 
+dependencies = [
+    "tapo"
+]
+
 [project.urls]
 "Homepage" = "https://github.com/RNLgit/garage-worker"
 "Bug Tracker" = "https://github.com/RNLgit/garage-worker/issues"
