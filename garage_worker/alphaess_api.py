@@ -5,17 +5,18 @@ You'll need a registered developer account to get AppID and AppSecret
 """
 
 import hashlib
+import os
 import time
 import requests
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 
-class AlphaESSClient:
-    """Client for interacting with AlphaESS OpenAPI"""
+class AlphaESSAPI:
+    """API for interacting with AlphaESS OpenAPI"""
 
     BASE_URL = "https://openapi.alphaess.com/api"
 
-    def __init__(self, app_id: str, app_secret: str):
+    def __init__(self, app_id: Optional[str] = None, app_secret: Optional[str] = None):
         """
         Initialize the AlphaESS API client
 
@@ -23,8 +24,8 @@ class AlphaESSClient:
             app_id: Developer ID (AppID) from AlphaESS portal
             app_secret: App Secret from AlphaESS portal
         """
-        self.app_id = app_id
-        self.app_secret = app_secret
+        self.app_id = app_id if app_id is not None else os.environ.get("ALPHAESS_APP_ID")
+        self.app_secret = app_secret if app_secret is not None else os.environ.get("ALPHAESS_APP_SECRET")
 
     def _generate_signature(self, timestamp: int) -> str:
         """
@@ -63,7 +64,18 @@ class AlphaESSClient:
 
         return headers
 
-    def get_last_power_data(self, system_sn: str) -> Dict[str, Any]:
+    @staticmethod
+    def parse_system_sn(sn_arg: Optional[str] = None) -> str:
+        """
+        Get the system serial number from environment variable, raise if every try fails
+        """
+        system_sn = sn_arg if sn_arg is not None else os.environ.get("ALPHAESS_SN")
+        if not system_sn:
+            raise ValueError(
+                "System Serial Number not provided. Set ALPHAESS_SN environment variable or pass as argument.")
+        return system_sn
+
+    def get_last_power_data(self, system_sn: Optional[str] = None) -> Dict[str, Any]:
         """
         Get real-time power data for a specific system
 
@@ -73,6 +85,7 @@ class AlphaESSClient:
         Returns:
             Dictionary containing power data or error information
         """
+        system_sn = self.parse_system_sn(system_sn)
         url = f"{self.BASE_URL}/getLastPowerData"
         headers = self._get_headers()
         params = {"sysSn": system_sn}
@@ -94,7 +107,7 @@ class AlphaESSClient:
             print(f"Request failed: {e}")
             return {"error": str(e)}
 
-    def get_system_summary(self, system_sn: str) -> Dict[str, Any]:
+    def get_system_summary(self, system_sn: Optional[str] = None) -> Dict[str, Any]:
         """
         Get system summary data including today's and total generation, consumption, etc.
 
@@ -104,6 +117,7 @@ class AlphaESSClient:
         Returns:
             Dictionary containing system summary data or error information
         """
+        system_sn = self.parse_system_sn(system_sn)
         url = f"{self.BASE_URL}/getSumDataForCustomer"
         headers = self._get_headers()
         params = {"sysSn": system_sn}
@@ -150,7 +164,7 @@ class AlphaESSClient:
             print(f"Request failed: {e}")
             return {"error": str(e)}
 
-    def get_one_day_power(self, system_sn: str, query_date: str) -> Dict[str, Any]:
+    def get_one_day_power(self, query_date: str, system_sn: Optional[str] = None) -> Dict[str, Any]:
         """
         Get system power data for a specific day (time-series data)
 
@@ -161,6 +175,7 @@ class AlphaESSClient:
         Returns:
             Dictionary containing power data timeline or error information
         """
+        system_sn = self.parse_system_sn(system_sn)
         url = f"{self.BASE_URL}/getOneDayPowerBySn"
         headers = self._get_headers()
         params = {
@@ -184,7 +199,7 @@ class AlphaESSClient:
             print(f"Request failed: {e}")
             return {"error": str(e)}
 
-    def get_one_day_energy(self, system_sn: str, query_date: str) -> Dict[str, Any]:
+    def get_one_day_energy(self, query_date: str, system_sn: Optional[str] = None) -> Dict[str, Any]:
         """
         Get system energy data for a specific day (daily totals)
 
@@ -195,6 +210,7 @@ class AlphaESSClient:
         Returns:
             Dictionary containing energy data or error information
         """
+        system_sn = self.parse_system_sn(system_sn)
         url = f"{self.BASE_URL}/getOneDateEnergyBySn"
         headers = self._get_headers()
         params = {
@@ -218,7 +234,7 @@ class AlphaESSClient:
             print(f"Request failed: {e}")
             return {"error": str(e)}
 
-    def get_charge_config(self, system_sn: str) -> Dict[str, Any]:
+    def get_charge_config(self, system_sn: Optional[str] = None) -> Dict[str, Any]:
         """
         Get charging configuration settings for a system
 
@@ -228,6 +244,7 @@ class AlphaESSClient:
         Returns:
             Dictionary containing charging configuration or error information
         """
+        system_sn = self.parse_system_sn(system_sn)
         url = f"{self.BASE_URL}/getChargeConfigInfo"
         headers = self._get_headers()
         params = {"sysSn": system_sn}
@@ -248,13 +265,16 @@ class AlphaESSClient:
             print(f"Request failed: {e}")
             return {"error": str(e)}
 
-    def print_power_data(self, system_sn: str):
+
+class AlphaESSClient(AlphaESSAPI):
+    def print_power_data(self, system_sn: Optional[str] = None):
         """
         Retrieve and print formatted power data
 
         Args:
             system_sn: System Serial Number
         """
+        system_sn = self.parse_system_sn(system_sn)
         data = self.get_last_power_data(system_sn)
 
         if data.get("code") == 200:
@@ -304,13 +324,14 @@ class AlphaESSClient:
         else:
             print(f"Failed to retrieve data: {data}")
 
-    def print_system_summary(self, system_sn: str):
+    def print_system_summary(self, system_sn: Optional[str] = None):
         """
         Retrieve and print formatted system summary data
 
         Args:
             system_sn: System Serial Number
         """
+        system_sn = self.parse_system_sn(system_sn)
         data = self.get_system_summary(system_sn)
 
         if data.get("code") == 200:
@@ -375,7 +396,7 @@ class AlphaESSClient:
         else:
             print(f"Failed to retrieve data: {data}")
 
-    def print_one_day_energy(self, system_sn: str, query_date: str):
+    def print_one_day_energy(self, query_date: str, system_sn: Optional[str] = None):
         """
         Retrieve and print energy data for a specific day
 
@@ -383,6 +404,7 @@ class AlphaESSClient:
             system_sn: System Serial Number
             query_date: Date in format yyyy-MM-dd (e.g., "2024-01-15")
         """
+        system_sn = self.parse_system_sn(system_sn)
         data = self.get_one_day_energy(system_sn, query_date)
 
         if data.get("code") == 200:
@@ -412,7 +434,7 @@ class AlphaESSClient:
         else:
             print(f"Failed to retrieve data: {data}")
 
-    def print_one_day_power(self, system_sn: str, query_date: str, max_records: int = 10):
+    def print_one_day_power(self,  query_date: str, system_sn: Optional[str] = None, max_records: int = 10):
         """
         Retrieve and print power data timeline for a specific day
 
@@ -421,6 +443,7 @@ class AlphaESSClient:
             query_date: Date in format yyyy-MM-dd (e.g., "2024-01-15")
             max_records: Maximum number of records to display (default: 10, use None for all)
         """
+        system_sn = self.parse_system_sn(system_sn)
         data = self.get_one_day_power(system_sn, query_date)
 
         if data.get("code") == 200:
@@ -459,13 +482,14 @@ class AlphaESSClient:
         else:
             print(f"Failed to retrieve data: {data}")
 
-    def print_charge_config(self, system_sn: str):
+    def print_charge_config(self, system_sn: Optional[str] = None):
         """
         Retrieve and print charging configuration
 
         Args:
             system_sn: System Serial Number
         """
+        system_sn = self.parse_system_sn(system_sn)
         data = self.get_charge_config(system_sn)
 
         if data.get("code") == 200:
@@ -554,18 +578,18 @@ if __name__ == "__main__":
         description="AlphaESS API Client - Retrieve solar battery system data",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
-Examples:
-  # Query today's data
-  python alphaess_api.py --app-id alphaef7900ee81dbbce9 --app-secret c2d2ef6c047c49678e2c332fb2d74c3c --system-sn AL2104XXXXXXXX
+            Examples:
+              # Query today's data
+              python alphaess_api.py --app-id alphaef7900ee81dbbce9 --app-secret c2d2ef6c047c49678e2c332fb2d74c3c --system-sn AL2104XXXXXXXX
 
-  # Query specific date
-  python alphaess_api.py --app-id alphaef7900ee81dbbce9 --app-secret c2d2ef6c047c49678e2c332fb2d74c3c --system-sn AL2104XXXXXXXX --date 2024-01-15
+              # Query specific date
+              python alphaess_api.py --app-id alphaef7900ee81dbbce9 --app-secret c2d2ef6c047c49678e2c332fb2d74c3c --system-sn AL2104XXXXXXXX --date 2024-01-15
 
-  # Use environment variables (recommended for security)
-  export ALPHAESS_APP_ID=alphaef7900ee81dbbce9
-  export ALPHAESS_APP_SECRET=c2d2ef6c047c49678e2c332fb2d74c3c
-  export ALPHAESS_SYSTEM_SN=AL2104XXXXXXXX
-  python alphaess_api.py
+              # Use environment variables (recommended for security)
+              export ALPHAESS_APP_ID=alphaef7900ee81dbbce9
+              export ALPHAESS_APP_SECRET=c2d2ef6c047c49678e2c332fb2d74c3c
+              export ALPHAESS_SYSTEM_SN=AL2104XXXXXXXX
+              python alphaess_api.py
         """
     )
 
