@@ -25,7 +25,8 @@ classifiers = [
 ]
 
 dependencies = [
-    "tapo"
+    "tapo",
+    "requests"
 ]
 
 [project.urls]

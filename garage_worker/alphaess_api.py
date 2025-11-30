@@ -434,7 +434,7 @@ class AlphaESSClient(AlphaESSAPI):
         else:
             print(f"Failed to retrieve data: {data}")
 
-    def print_one_day_power(self,  query_date: str, system_sn: Optional[str] = None, max_records: int = 10):
+    def print_one_day_power(self, query_date: str, system_sn: Optional[str] = None, max_records: int = 10):
         """
         Retrieve and print power data timeline for a specific day
 
@@ -513,6 +513,269 @@ class AlphaESSClient(AlphaESSAPI):
             print(f"\n{'=' * 50}\n")
         else:
             print(f"Failed to retrieve data: {data}")
+
+    def fetch_power_data(self, system_sn: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieve power data in JSON-serializable format
+
+        Args:
+            system_sn: System Serial Number
+
+        Returns:
+            Dictionary with formatted power data or error information
+        """
+        system_sn = self.parse_system_sn(system_sn)
+        data = self.get_last_power_data(system_sn)
+
+        if data.get("code") != 200:
+            return {"error": data.get("msg", "Failed to retrieve data"), "code": data.get("code")}
+
+        power_data = data.get("data", {})
+
+        result = {
+            "pv_total_power_w": power_data.get('ppv', 0),
+            "battery_power_w": power_data.get('pbat', 0),
+            "battery_soc_percent": power_data.get('soc', 0),
+            "load_power_w": power_data.get('pload', 0),
+            "grid_power_w": power_data.get('pgrid', 0),
+            "ev_charger_total_w": power_data.get('pev', 0),
+        }
+
+        # Add grid status
+        pgrid = power_data.get('pgrid', 0)
+        if pgrid > 0:
+            result["grid_status"] = "importing"
+        elif pgrid < 0:
+            result["grid_status"] = "exporting"
+        else:
+            result["grid_status"] = "zero"
+
+        # Add PV details if available
+        pv_details = power_data.get('ppvDetailData', {})
+        if pv_details:
+            result["pv_details"] = {
+                "pv1_w": pv_details.get('ppv1', 0),
+                "pv2_w": pv_details.get('ppv2', 0),
+                "pv3_w": pv_details.get('ppv3', 0),
+                "pv4_w": pv_details.get('ppv4', 0),
+            }
+
+        # Add grid details if available
+        grid_details = power_data.get('pgridDetailData', {})
+        if grid_details:
+            result["grid_details"] = {
+                "l1_w": grid_details.get('pmeterL1', 0),
+                "l2_w": grid_details.get('pmeterL2', 0),
+                "l3_w": grid_details.get('pmeterL3', 0),
+            }
+
+        # Add EV details if available
+        ev_details = power_data.get('pevDetailData', {})
+        if ev_details:
+            result["ev_details"] = {
+                "ev1_w": ev_details.get('ev1Power', 0),
+                "ev2_w": ev_details.get('ev2Power', 0),
+                "ev3_w": ev_details.get('ev3Power', 0),
+                "ev4_w": ev_details.get('ev4Power', 0),
+            }
+
+        return result
+
+    def fetch_system_summary(self, system_sn: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieve system summary data in JSON-serializable format
+
+        Args:
+            system_sn: System Serial Number
+
+        Returns:
+            Dictionary with formatted system summary or error information
+        """
+        system_sn = self.parse_system_sn(system_sn)
+        data = self.get_system_summary(system_sn)
+
+        if data.get("code") != 200:
+            return {"error": data.get("msg", "Failed to retrieve data"), "code": data.get("code")}
+
+        summary = data.get("data", {})
+
+        result = {
+            "today_data": {
+                "generation_kwh": summary.get('epvtoday', 0),
+                "load_kwh": summary.get('eload', 0),
+                "feed_in_kwh": summary.get('eoutput', 0),
+                "consumed_kwh": summary.get('einput', 0),
+                "charged_kwh": summary.get('echarge', 0),
+                "discharged_kwh": summary.get('edischarge', 0),
+                "income": summary.get('todayIncome', 0),
+                "income_currency": summary.get('moneyType', ''),
+            },
+            "total": {
+                "total_generation_kwh": summary.get('epvtotal', 0),
+                "total_profit": summary.get('totalIncome', 0),
+                "total_profit_currency": summary.get('moneyType', ''),
+            },
+            "efficiency": {
+                "self_consumption_percent": summary.get('eselfConsumption', 0),
+                "self_sufficiency_percent": summary.get('eselfSufficiency', 0),
+            },
+            "environmental_impact": {
+                "trees_planted": summary.get('treeNum', 0),
+                "co2_reduction_kg": summary.get('carbonNum', 0),
+            },
+        }
+
+        return result
+
+    def fetch_system_list(self) -> Dict[str, Any]:
+        """
+        Retrieve list of all systems in JSON-serializable format
+
+        Returns:
+            Dictionary with list of systems or error information
+        """
+        data = self.get_system_list()
+
+        if data.get("code") != 200:
+            return {"error": data.get("msg", "Failed to retrieve data"), "code": data.get("code")}
+
+        systems = data.get("data", [])
+
+        result = {
+            "system_count": len(systems),
+            "systems": []
+        }
+
+        for system in systems:
+            result["systems"].append({
+                "serial_number": system.get('sysSn', 'N/A'),
+                "ems_status": system.get('emsStatus', 'N/A'),
+                "inverter_model": system.get('minv', 'N/A'),
+                "inverter_power_kw": system.get('poinv', 0),
+                "pv_nominal_power_kw": system.get('popv', 0),
+                "battery_model": system.get('mbat', 'N/A'),
+                "battery_capacity_kwh": system.get('cobat', 0),
+                "remaining_capacity_kwh": system.get('surplusCobat', 0),
+                "available_percent": system.get('usCapacity', 0),
+            })
+
+        return result
+
+    def fetch_one_day_energy(self, query_date: str, system_sn: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieve energy data for a specific day in JSON-serializable format
+
+        Args:
+            query_date: Date in format yyyy-MM-dd (e.g., "2024-01-15")
+            system_sn: System Serial Number
+
+        Returns:
+            Dictionary with formatted energy data or error information
+        """
+        system_sn = self.parse_system_sn(system_sn)
+        data = self.get_one_day_energy(query_date, system_sn)
+
+        if data.get("code") != 200:
+            return {"error": data.get("msg", "Failed to retrieve data"), "code": data.get("code")}
+
+        energy = data.get("data", {})
+
+        result = {
+            "query_date": query_date,
+            "generation": {
+                "pv_generation_kwh": energy.get('epv', 0),
+            },
+            "battery": {
+                "total_charged_kwh": energy.get('eCharge', 0),
+                "total_discharged_kwh": energy.get('eDischarge', 0),
+                "grid_charged_kwh": energy.get('eGridCharge', 0),
+            },
+            "grid": {
+                "grid_consumption_kwh": energy.get('eInput', 0),
+                "feed_in_kwh": energy.get('eOutput', 0),
+            },
+            "ev_charging": {
+                "charging_pile_kwh": energy.get('eChargingPile', 0),
+            },
+        }
+
+        return result
+
+    def fetch_one_day_power(self, query_date: str, system_sn: Optional[str] = None,
+                            max_records: Optional[int] = None) -> Dict[str, Any]:
+        """
+        Retrieve power data timeline for a specific day in JSON-serializable format
+
+        Args:
+            query_date: Date in format yyyy-MM-dd (e.g., "2024-01-15")
+            system_sn: System Serial Number
+            max_records: Maximum number of records to return (default: None for all records)
+
+        Returns:
+            Dictionary with formatted power timeline data or error information
+        """
+        system_sn = self.parse_system_sn(system_sn)
+        data = self.get_one_day_power(query_date, system_sn)
+
+        if data.get("code") != 200:
+            return {"error": data.get("msg", "Failed to retrieve data"), "code": data.get("code")}
+
+        power_data = data.get("data", [])
+
+        # Limit records if max_records is specified
+        if max_records is not None:
+            power_data = power_data[:max_records]
+
+        result = {
+            "query_date": query_date,
+            "total_records": len(data.get("data", [])),
+            "returned_records": len(power_data),
+            "records": []
+        }
+
+        for record in power_data:
+            result["records"].append({
+                "upload_time": record.get('uploadTime', 'N/A'),
+                "pv_power_w": record.get('ppv', 0),
+                "battery_power_w": record.get('cobat', 0),
+                "load_w": record.get('load', 0),
+                "grid_charge_w": record.get('gridCharge', 0),
+                "feed_in_w": record.get('feedIn', 0),
+                "charging_pile_w": record.get('pChargingPile', 0),
+            })
+
+        return result
+
+    def fetch_charge_config(self, system_sn: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Retrieve charging configuration in JSON-serializable format
+
+        Args:
+            system_sn: System Serial Number
+
+        Returns:
+            Dictionary with formatted charging configuration or error information
+        """
+        system_sn = self.parse_system_sn(system_sn)
+        data = self.get_charge_config(system_sn)
+
+        if data.get("code") != 200:
+            return {"error": data.get("msg", "Failed to retrieve data"), "code": data.get("code")}
+
+        config = data.get("data", {})
+
+        result = {
+            "grid_charging_enabled": config.get('gridCharge', 0) == 1,
+            "charging_stops_at_soc_percent": config.get('batHighCap', 0),
+            "charging_periods": {
+                "period_1_start": config.get('timeChaf1', 'N/A'),
+                "period_1_end": config.get('timeChae1', 'N/A'),
+                "period_2_start": config.get('timeChaf2', 'N/A'),
+                "period_2_end": config.get('timeChae2', 'N/A'),
+            },
+        }
+
+        return result
 
 
 def demo(app_id: str, app_secret: str, system_sn: str, query_date: str = None):
