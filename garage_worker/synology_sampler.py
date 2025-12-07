@@ -19,6 +19,8 @@ class SynologySampler:
         self.port = port if port is not None else NAS_PORT
         self.username = username or os.getenv("SYNOLOGY_USER_NAME")
         self.password = password or os.getenv("SYNOLOGY_USER_PASSWORD")
+        if not all([self.username, self.password]):
+            raise ValueError("Missing one of the credentials: username, password")
         self.base_url = self.BASE_URL.format(nas_ip=self.ip, port=self.port)
         self.session = requests.Session()
         self.sid = None
@@ -45,6 +47,12 @@ class SynologySampler:
             },
             verify=False,
         ).json()
+        if not login.get("success"):
+            code = login.get("error", {}).get("code")
+            if code == 400:
+                raise PermissionError("❌ Login failed: Invalid username or password")
+            else:
+                raise PermissionError("❌ Login failed:", login.get("error", {}))
         self.sid = login["data"]["sid"]
 
     def synology_get(self, params) -> dict:
