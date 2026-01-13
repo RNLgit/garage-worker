@@ -114,7 +114,14 @@ class SynologySampler:
                 "real_usage_pct": util["data"]["memory"]["real_usage"],
                 "total_real": util["data"]["memory"]["total_real"],
                 "avail_real": util["data"]["memory"]["avail_real"],
+                "buffer": util["data"]["memory"]["buffer"],
+                "cached": util["data"]["memory"]["cached"],
+                "memory_size": util["data"]["memory"]["memory_size"],
                 "swap_usage_pct": util["data"]["memory"]["swap_usage"],
+                "total_swap": util["data"]["memory"]["total_swap"],
+                "avail_swap": util["data"]["memory"]["avail_swap"],
+                "si_disk": util["data"]["memory"]["si_disk"],
+                "so_disk": util["data"]["memory"]["so_disk"],
             },
             # Network (counters direct)
             "network": util["data"]["network"],
@@ -165,3 +172,117 @@ class SynologySampler:
             },
         }
         return payload
+
+    def get_system_snapshot(self) -> dict:
+        """Get a simplified snapshot of system metrics for database logging
+
+        Returns a flattened dictionary with key metrics for charting and monitoring:
+        - Timestamp
+        - CPU and RAM usage
+        - Network traffic
+        - Storage usage and health
+        - Disk temperatures and health status
+        - System status
+        """
+        raw_data = self.get_one_sample()
+
+        # Calculate total network traffic
+        total_network = next((net for net in raw_data['network'] if net['device'] == 'total'), None)
+
+        # Calculate total storage usage across volumes
+        total_storage_used = sum(int(v['used']) for v in raw_data['volumes'])
+        total_storage_capacity = sum(int(v['total']) for v in raw_data['volumes'])
+        storage_usage_pct = round((total_storage_used / total_storage_capacity * 100), 2) if total_storage_capacity > 0 else 0
+
+        # Get disk health summary
+        all_disks_healthy = all(d['status'] == 'normal' and d['smart_status'] == 'normal' for d in raw_data['hardware'])
+
+        # Get max disk temperature
+        max_disk_temp = max((d['temp_c'] for d in raw_data['hardware']), default=0)
+
+        # Create simplified snapshot
+        snapshot = {
+            'timestamp': raw_data['ts'],
+
+            # CPU metrics
+            'cpu_load_1min': raw_data['cpu']['load_1'],
+            'cpu_load_5min': raw_data['cpu']['load_5'],
+            'cpu_load_15min': raw_data['cpu']['load_15'],
+            'cpu_user_pct': raw_data['cpu']['user'],
+            'cpu_system_pct': raw_data['cpu']['system'],
+
+            # Memory metrics
+            'memory_usage_pct': raw_data['memory']['real_usage_pct'],
+            'memory_total_mb': round(raw_data['memory']['total_real'] / 1024, 2),
+            'memory_available_mb': round(raw_data['memory']['avail_real'] / 1024, 2),
+
+            # Memory composition (for stacked chart)
+            'memory_reserved_mb': round((raw_data['memory']['memory_size'] - raw_data['memory']['total_real']) / 1024, 2),
+            'memory_used_mb': round((raw_data['memory']['total_real'] - raw_data['memory']['avail_real'] -
+                                    raw_data['memory']['buffer'] - raw_data['memory']['cached']) / 1024, 2),
+            'memory_buffer_mb': round(raw_data['memory']['buffer'] / 1024, 2),
+            'memory_cached_mb': round(raw_data['memory']['cached'] / 1024, 2),
+            'memory_free_mb': round(raw_data['memory']['avail_real'] / 1024, 2),
+            'memory_physical_size_mb': round(raw_data['memory']['memory_size'] / 1024, 2),
+
+            # Swap metrics
+            'swap_usage_pct': raw_data['memory']['swap_usage_pct'],
+            'swap_total_mb': round(raw_data['memory']['total_swap'] / 1024, 2),
+            'swap_available_mb': round(raw_data['memory']['avail_swap'] / 1024, 2),
+            'swap_used_mb': round((raw_data['memory']['total_swap'] - raw_data['memory']['avail_swap']) / 1024, 2),
+
+            # Network metrics (bytes/sec or cumulative counters)
+            'network_rx_bytes': total_network['rx'] if total_network else 0,
+            'network_tx_bytes': total_network['tx'] if total_network else 0,
+
+            # Storage metrics
+            'storage_usage_pct': storage_usage_pct,
+            'storage_used_gb': round(total_storage_used / (1024**3), 2),
+            'storage_total_gb': round(total_storage_capacity / (1024**3), 2),
+
+            # Temperature metrics
+            'max_disk_temp_c': max_disk_temp,
+            'disk_temperatures': [
+                {'disk': d['id'], 'temp_c': d['temp_c']}
+                for d in raw_data['hardware']
+            ],
+
+            # Health metrics
+            'all_disks_healthy': all_disks_healthy,
+            'disk_health': [
+                {
+                    'disk': d['id'],
+                    'model': d['model'],
+                    'status': d['status'],
+                    'smart_status': d['smart_status']
+                }
+                for d in raw_data['hardware']
+            ],
+
+            # RAID/Pool status
+            'pools_status': [
+                {
+                    'id': p['id'],
+                    'status': p['status'],
+                    'usage_pct': round((int(p['used']) / int(p['total']) * 100), 2) if int(p['total']) > 0 else 0
+                }
+                for p in raw_data['pools']
+            ],
+
+            # System status
+            'system_healthy': not any([
+                raw_data['env']['system_crashed'],
+                raw_data['env']['system_need_repair'],
+                raw_data['env']['system_rebuilding']
+            ]),
+            'system_status': {
+                'crashed': raw_data['env']['system_crashed'],
+                'needs_repair': raw_data['env']['system_need_repair'],
+                'rebuilding': raw_data['env']['system_rebuilding']
+            },
+
+            # Model info
+            'model': raw_data['env']['model_name'],
+        }
+
+        return snapshot

@@ -5,7 +5,6 @@ You'll need a registered developer account to get AppID and AppSecret
 """
 
 import hashlib
-import os
 import time
 import requests
 from typing import Dict, Any, Optional
