@@ -2,6 +2,7 @@ import os
 import requests
 import urllib3
 from datetime import datetime
+from typing import Optional
 from zoneinfo import ZoneInfo
 
 
@@ -14,7 +15,7 @@ DEFAULT_TIMEZONE = os.getenv("NAS_TIMEZONE", "Australia/Melbourne")
 class SynologySampler:
     BASE_URL = "https://{nas_ip}:{port}/webapi/entry.cgi"
 
-    def __init__(self, ip: str, port: int = None, username: str = None, password: str | None = None):
+    def __init__(self, ip: str, port: Optional[int] = None, username: Optional[str] = None, password: Optional[str] = None):
         self.ip = ip
         self.port = port if port is not None else NAS_PORT
         self.username = username or os.getenv("SYNOLOGY_USER_NAME")
