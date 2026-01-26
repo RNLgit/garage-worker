@@ -26,7 +26,8 @@ classifiers = [
 
 dependencies = [
     "tapo",
-    "requests"
+    "requests",
+    "bambu-lab-cloud-api>=1.0.5",
 ]
 
 [project.urls]
