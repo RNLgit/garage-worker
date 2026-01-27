@@ -27,7 +27,9 @@ Usage:
 import io
 import logging
 import os
+import platform
 import sys
+import select
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -57,6 +59,54 @@ def suppress_stdout():
         yield
     finally:
         sys.stdout = old_stdout
+
+
+def timed_input(prompt: str, timeout_sec: int = 300) -> str:
+    """
+    Get user input with a timeout.
+
+    Args:
+        prompt: The prompt to display
+        timeout_sec: Timeout in seconds (default 300 = 5 minutes)
+
+    Returns:
+        User input string
+
+    Raises:
+        TimeoutError: If no input received within timeout
+    """
+
+
+    print(prompt, end='', flush=True)
+
+    if platform.system() == 'Windows':
+        # Windows doesn't support select on stdin, use threading
+        import threading
+        result = {'value': None, 'done': False}
+
+        def get_input():
+            try:
+                result['value'] = input()
+            except EOFError:
+                result['value'] = None
+            result['done'] = True
+
+        thread = threading.Thread(target=get_input, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_sec)
+
+        if not result['done']:
+            print()  # newline
+            raise TimeoutError(f"No input received within {timeout_sec} seconds")
+        return result['value'] or ""
+    else:
+        # Unix/Mac - use select
+        ready, _, _ = select.select([sys.stdin], [], [], timeout_sec)
+        if ready:
+            return sys.stdin.readline().strip()
+        else:
+            print()  # newline
+            raise TimeoutError(f"No input received within {timeout_sec} seconds")
 
 
 @dataclass
@@ -286,6 +336,9 @@ class PrinterState:
     spd_lvl: int = 0
     spd_mag: int = 0
 
+    # External spool (virtual tray) - used when not using AMS
+    vt_tray: Optional[Dict[str, Any]] = None
+
     # Raw data for any additional fields
     _raw_data: Dict[str, Any] = field(default_factory=dict, repr=False)
 
@@ -382,6 +435,9 @@ class PrinterState:
             spd_lvl=int(print_data.get("spd_lvl", 0)),
             spd_mag=int(print_data.get("spd_mag", 0)),
 
+            # External spool (virtual tray)
+            vt_tray=print_data.get("vt_tray"),
+
             _raw_data=data,
         )
 
@@ -468,12 +524,18 @@ class PrinterState:
             "bed_target_temp": round(self.bed_target_temp, 2),
             "chamber_temp": round(self.chamber_temp, 2),
 
+            # Nozzle info
+            "nozzle_diameter": self.nozzle_diameter,
+            "nozzle_type": self.nozzle_type,
+
             # Print state
             "gcode_state": self.gcode_state,
+            "print_type": self.print_type,
             "print_percent": self.print_percent,
             "remaining_time_min": self.remaining_time_min,
             "layer_num": self.layer_num,
             "total_layer_num": self.total_layer_num,
+            "print_line_number": self.print_line_number,
 
             # Current job
             "subtask_name": self.subtask_name,
@@ -489,24 +551,38 @@ class PrinterState:
             # Errors
             "print_error": self.print_error,
             "has_errors": self.print_error != 0,
+
+            # Lights
+            "lights_report": self.lights_report,
+            "chamber_light": self._get_chamber_light_status(),
+
+            # IP Camera
+            "ipcam_record": self.ipcam.get("ipcam_record", ""),
+            "timelapse": self.ipcam.get("timelapse", ""),
         }
 
         # Add AMS summary if available
         if self.ams:
             snapshot["ams_unit_count"] = len(self.ams.units)
             snapshot["ams_status"] = self.ams.ams_status
+            snapshot["ams_exist_bits"] = self.ams.ams_exist_bits
+            snapshot["tray_exist_bits"] = self.ams.tray_exist_bits
 
-            # Summarize filament info
+            # Summarize filament info with additional details
             filaments = []
             for unit in self.ams.units:
                 for tray in unit.trays:
                     if tray.tray_type:  # has filament
                         filaments.append({
+                            "tray_id": tray.tray_id,
                             "slot": tray.tray_id_name,
                             "type": tray.tray_type,
                             "brand": tray.tray_sub_brands,
                             "color": tray.tray_color,
                             "remain_percent": tray.remain_percent,
+                            "tray_diameter": tray.tray_diameter,
+                            "nozzle_temp_min": tray.nozzle_temp_min,
+                            "nozzle_temp_max": tray.nozzle_temp_max,
                         })
             snapshot["filaments"] = filaments
 
@@ -516,7 +592,22 @@ class PrinterState:
                 snapshot["ams_humidity_raw"] = self.ams.units[0].humidity_raw
                 snapshot["ams_temp"] = self.ams.units[0].temp
 
+        # External spool (virtual tray) - when not using AMS
+        if self.vt_tray:
+            snapshot["external_spool"] = {
+                "type": self.vt_tray.get("tray_type", ""),
+                "color": self.vt_tray.get("tray_color", ""),
+                "remain": self.vt_tray.get("remain", 0),
+            }
+
         return snapshot
+
+    def _get_chamber_light_status(self) -> str:
+        """Extract chamber light status from lights_report"""
+        for light in self.lights_report:
+            if light.get("node") == "chamber_light":
+                return light.get("mode", "unknown")
+        return "unknown"
 
     @property
     def is_printing(self) -> bool:
@@ -642,6 +733,7 @@ class BambuPrinter:
         device_id: Optional[str] = None,
         on_update: Optional[Callable[[PrinterState], None]] = None,
         silent: bool = True,
+        verification_timeout: int = 300,
     ):
         """
         Initialize BambuPrinter.
@@ -653,6 +745,7 @@ class BambuPrinter:
             device_id: Specific device ID to monitor (optional, uses first device)
             on_update: Callback function called on each MQTT update
             silent: If True, suppress stdout prints from library (default: True)
+            verification_timeout: Seconds to wait for 2FA code input (default: 300)
         """
         self.username = username or os.getenv("BAMBU_USERNAME")
         self.password = password or os.getenv("BAMBU_PASSWORD")
@@ -661,6 +754,7 @@ class BambuPrinter:
         self._uid: Optional[str] = None
         self._on_update = on_update
         self._silent = silent
+        self._verification_timeout = verification_timeout
 
         self._client: Optional[BambuClient] = None
         self._mqtt: Optional[MQTTClient] = None
@@ -668,10 +762,19 @@ class BambuPrinter:
         self._connected = False
         self._devices: List[Dict[str, Any]] = []
 
-    def _get_fresh_token(self) -> str:
+    def _get_fresh_token(self, verification_code_timeout: int = 300) -> str:
         """
         Get a fresh token using credentials.
-        Suppresses stdout if silent mode is enabled.
+
+        For first-time login, 2FA verification code may be required.
+        User will be prompted to enter the code sent to their email.
+
+        Args:
+            verification_code_timeout: Seconds to wait for verification code input (default 300)
+
+        Raises:
+            ValueError: If credentials not provided
+            TimeoutError: If verification code not entered within timeout
         """
         if not self.username or not self.password:
             raise ValueError(
@@ -679,30 +782,102 @@ class BambuPrinter:
                 "or set BAMBU_USERNAME and BAMBU_PASSWORD environment variables."
             )
 
-        logger.debug("Refreshing BambuLab token...")
+        print("\n" + "=" * 60)
+        print("BambuLab Authentication")
+        print("=" * 60)
+        print(f"Authenticating as: {self.username}")
+        print("This may require email verification (2FA)...")
+        print()
 
         auth = BambuAuthenticator()
-        if self._silent:
-            with suppress_stdout():
+
+        try:
+            # First attempt - try to get existing/cached token
+            if self._silent:
+                with suppress_stdout():
+                    token = auth.get_or_create_token(
+                        username=self.username,
+                        password=self.password
+                    )
+            else:
                 token = auth.get_or_create_token(
                     username=self.username,
                     password=self.password
                 )
-        else:
-            token = auth.get_or_create_token(
-                username=self.username,
-                password=self.password
-            )
 
-        self._token = token
-        logger.info("BambuLab token refreshed successfully")
-        return token
+            self._token = token
+            print("Authentication successful!")
+            print(f"Token: {token[:20]}...{token[-10:]}")
+            print("=" * 60 + "\n")
+            logger.info("BambuLab token obtained successfully")
+            return token
+
+        except Exception as e:
+            error_msg = str(e).lower()
+
+            # Check if it's a verification code request
+            if "verification" in error_msg or "code" in error_msg or "2fa" in error_msg:
+                print("\n" + "-" * 60)
+                print("EMAIL VERIFICATION REQUIRED")
+                print("-" * 60)
+                print("A verification code has been sent to your email.")
+                print(f"You have {verification_code_timeout} seconds to enter it.")
+                print()
+
+                try:
+                    code = timed_input(
+                        "Enter verification code: ",
+                        timeout_sec=verification_code_timeout
+                    )
+
+                    if not code:
+                        raise ValueError("No verification code entered")
+
+                    # Try login with verification code
+                    print("Verifying code...")
+                    token = auth.login(
+                        self.username,
+                        self.password,
+                        verification_code=code
+                    )
+
+                    self._token = token
+                    print("\nAuthentication successful!")
+                    print(f"Token: {token[:20]}...{token[-10:]}")
+                    print("=" * 60 + "\n")
+                    print("TIP: Save this token to BAMBU_TOKEN env var to skip login next time")
+                    logger.info("BambuLab token obtained with 2FA verification")
+                    return token
+
+                except TimeoutError:
+                    print("\nVerification timed out!")
+                    print("Please try again or check your email for the code.")
+                    raise TimeoutError(
+                        f"Verification code not entered within {verification_code_timeout} seconds"
+                    )
+            else:
+                # Re-raise other errors
+                print(f"\nAuthentication failed: {e}")
+                raise
 
     def _ensure_token(self) -> str:
         """Ensure we have a valid token, refreshing if needed"""
         if self._token:
+            logger.debug("Using existing token")
             return self._token
-        return self._get_fresh_token()
+
+        # No token available - need to authenticate
+        print("\n" + "!" * 60)
+        print("NO TOKEN FOUND")
+        print("!" * 60)
+        print("Checked:")
+        print("  - Constructor 'token' parameter: Not provided")
+        print("  - Environment variable 'BAMBU_TOKEN': Not set")
+        print()
+        print("Will attempt to authenticate with username/password...")
+        print("!" * 60 + "\n")
+
+        return self._get_fresh_token(verification_code_timeout=self._verification_timeout)
 
     def _validate_token(self) -> bool:
         """
