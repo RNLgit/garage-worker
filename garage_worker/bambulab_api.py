@@ -577,12 +577,16 @@ class PrinterState:
                             "tray_id": tray.tray_id,
                             "slot": tray.tray_id_name,
                             "type": tray.tray_type,
-                            "brand": tray.tray_sub_brands,
+                            "sub_type": tray.tray_sub_brands,  # ← FIXED: This is material sub-type, not brand!
                             "color": tray.tray_color,
                             "remain_percent": tray.remain_percent,
                             "tray_diameter": tray.tray_diameter,
                             "nozzle_temp_min": tray.nozzle_temp_min,
                             "nozzle_temp_max": tray.nozzle_temp_max,
+                            # NEW: Add RFID and state fields
+                            "tag_uid": tray.tag_uid,      # ← RFID unique identifier
+                            "state": tray.state,          # ← Tray state
+                            "tray_uuid": tray.tray_uuid,  # ← Tray UUID
                         })
             snapshot["filaments"] = filaments
 
