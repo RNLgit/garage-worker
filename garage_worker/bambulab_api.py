@@ -126,6 +126,19 @@ class FilamentTray:
     state: int = 0  # tray state code
     tag_uid: str = ""
     tray_uuid: str = ""
+    # Flow calibration
+    k: float = 0.0  # flow calibration K value
+    n: float = 0.0  # calibration N value
+    cali_idx: int = -1  # calibration index
+    # Filament capacity
+    total_len: int = 0  # total filament length in mm
+    # Filament profile
+    tray_info_idx: str = ""  # tray info index (e.g., "GFA00")
+    tray_time: int = 0  # drying time recommendation
+    tray_bed_temp: int = 0  # recommended bed temp for this filament
+    bed_temp_type: int = 0  # bed temp type flag
+    # Multi-color
+    cols: List[str] = field(default_factory=list)  # color array for multi-color filaments
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "FilamentTray":
@@ -145,6 +158,15 @@ class FilamentTray:
             state=data.get("state", 0),
             tag_uid=data.get("tag_uid", ""),
             tray_uuid=data.get("tray_uuid", ""),
+            k=float(data.get("k", 0.0)),
+            n=float(data.get("n", 0.0)),
+            cali_idx=int(data.get("cali_idx", -1)),
+            total_len=int(data.get("total_len", 0)),
+            tray_info_idx=data.get("tray_info_idx", ""),
+            tray_time=int(data.get("tray_time", 0)),
+            tray_bed_temp=int(data.get("bed_temp", 0)),
+            bed_temp_type=int(data.get("bed_temp_type", 0)),
+            cols=data.get("cols", []),
         )
 
     def to_dict(self) -> Dict[str, Any]:
@@ -164,6 +186,15 @@ class FilamentTray:
             "state": self.state,
             "tag_uid": self.tag_uid,
             "tray_uuid": self.tray_uuid,
+            "k": self.k,
+            "n": self.n,
+            "cali_idx": self.cali_idx,
+            "total_len": self.total_len,
+            "tray_info_idx": self.tray_info_idx,
+            "tray_time": self.tray_time,
+            "tray_bed_temp": self.tray_bed_temp,
+            "bed_temp_type": self.bed_temp_type,
+            "cols": self.cols,
         }
 
 
@@ -176,6 +207,8 @@ class AMSUnit:
     humidity_raw: int = -1  # raw humidity percentage
     temp: float = 0.0  # internal temperature
     dry_time: int = 0  # remaining dry time
+    chip_id: str = ""  # AMS hardware chip identifier
+    info: str = ""  # AMS info string (e.g., "1001")
     trays: List[FilamentTray] = field(default_factory=list)
 
     @classmethod
@@ -189,6 +222,8 @@ class AMSUnit:
             humidity_raw=int(data.get("humidity_raw", -1)),
             temp=float(data.get("temp", 0.0)),
             dry_time=data.get("dry_time", 0),
+            chip_id=data.get("chip_id", ""),
+            info=data.get("info", ""),
             trays=trays,
         )
 
@@ -201,6 +236,8 @@ class AMSUnit:
             "humidity_raw": self.humidity_raw,
             "temp": self.temp,
             "dry_time": self.dry_time,
+            "chip_id": self.chip_id,
+            "info": self.info,
             "trays": [t.to_dict() for t in self.trays],
         }
 
@@ -215,6 +252,11 @@ class AMSState:
     tray_tar: str = ""  # target tray
     ams_status: int = 0
     ams_rfid_status: int = 0
+    tray_is_bbl_bits: str = ""  # which trays have Bambu Lab (OEM) filament
+    tray_read_done_bits: str = ""  # RFID read completion status
+    version: int = 0  # AMS firmware version
+    insert_flag: bool = False  # filament insertion flag
+    power_on_flag: bool = False  # AMS power on flag
     units: List[AMSUnit] = field(default_factory=list)
 
     @classmethod
@@ -229,6 +271,11 @@ class AMSState:
             tray_tar=data.get("tray_tar", ""),
             ams_status=data.get("ams_status", 0),
             ams_rfid_status=data.get("ams_rfid_status", 0),
+            tray_is_bbl_bits=data.get("tray_is_bbl_bits", ""),
+            tray_read_done_bits=data.get("tray_read_done_bits", ""),
+            version=int(data.get("version", 0)),
+            insert_flag=bool(data.get("insert_flag", False)),
+            power_on_flag=bool(data.get("power_on_flag", False)),
             units=units,
         )
 
@@ -242,6 +289,11 @@ class AMSState:
             "tray_tar": self.tray_tar,
             "ams_status": self.ams_status,
             "ams_rfid_status": self.ams_rfid_status,
+            "tray_is_bbl_bits": self.tray_is_bbl_bits,
+            "tray_read_done_bits": self.tray_read_done_bits,
+            "version": self.version,
+            "insert_flag": self.insert_flag,
+            "power_on_flag": self.power_on_flag,
             "units": [u.to_dict() for u in self.units],
         }
 
@@ -335,6 +387,15 @@ class PrinterState:
     # Speed settings
     spd_lvl: int = 0
     spd_mag: int = 0
+
+    # Auxiliary fans
+    big_fan1_speed: int = 0  # auxiliary/chamber fan 1 speed
+    big_fan2_speed: int = 0  # auxiliary/chamber fan 2 speed
+
+    # System info
+    sdcard: bool = False  # SD card present
+    gcode_file_prepare_percent: str = ""  # file preparation progress
+    lifecycle: str = ""  # product lifecycle state (e.g., "product")
 
     # External spool (virtual tray) - used when not using AMS
     vt_tray: Optional[Dict[str, Any]] = None
@@ -434,6 +495,15 @@ class PrinterState:
             hms=print_data.get("hms", []),
             spd_lvl=int(print_data.get("spd_lvl", 0)),
             spd_mag=int(print_data.get("spd_mag", 0)),
+
+            # Auxiliary fans
+            big_fan1_speed=int(print_data.get("big_fan1_speed", 0)),
+            big_fan2_speed=int(print_data.get("big_fan2_speed", 0)),
+
+            # System info
+            sdcard=bool(print_data.get("sdcard", False)),
+            gcode_file_prepare_percent=str(print_data.get("gcode_file_prepare_percent", "")),
+            lifecycle=print_data.get("lifecycle", ""),
 
             # External spool (virtual tray)
             vt_tray=print_data.get("vt_tray"),
@@ -544,6 +614,12 @@ class PrinterState:
             # Fans
             "cooling_fan_speed": self.cooling_fan_speed,
             "heatbreak_fan_speed": self.heatbreak_fan_speed,
+            "big_fan1_speed": self.big_fan1_speed,
+            "big_fan2_speed": self.big_fan2_speed,
+
+            # Speed settings
+            "spd_lvl": self.spd_lvl,
+            "spd_mag": self.spd_mag,
 
             # Network
             "wifi_signal_dbm": self.wifi_signal_dbm,
@@ -551,6 +627,8 @@ class PrinterState:
             # Errors
             "print_error": self.print_error,
             "has_errors": self.print_error != 0,
+            "hms": self.hms,
+            "stg_cur": self.stg_cur,
 
             # Lights
             "lights_report": self.lights_report,
@@ -559,16 +637,26 @@ class PrinterState:
             # IP Camera
             "ipcam_record": self.ipcam.get("ipcam_record", ""),
             "timelapse": self.ipcam.get("timelapse", ""),
+
+            # System info
+            "sdcard": self.sdcard,
+            "gcode_file_prepare_percent": self.gcode_file_prepare_percent,
+            "lifecycle": self.lifecycle,
         }
 
         # Add AMS summary if available
         if self.ams:
             snapshot["ams_unit_count"] = len(self.ams.units)
             snapshot["ams_status"] = self.ams.ams_status
+            snapshot["ams_rfid_status"] = self.ams.ams_rfid_status
             snapshot["ams_exist_bits"] = self.ams.ams_exist_bits
             snapshot["tray_exist_bits"] = self.ams.tray_exist_bits
+            snapshot["tray_is_bbl_bits"] = self.ams.tray_is_bbl_bits
+            snapshot["tray_read_done_bits"] = self.ams.tray_read_done_bits
+            snapshot["tray_now"] = self.ams.tray_now
+            snapshot["ams_version"] = self.ams.version
 
-            # Summarize filament info with additional details
+            # Summarize filament info with all available details
             filaments = []
             for unit in self.ams.units:
                 for tray in unit.trays:
@@ -577,20 +665,46 @@ class PrinterState:
                             "tray_id": tray.tray_id,
                             "slot": tray.tray_id_name,
                             "type": tray.tray_type,
-                            "sub_type": tray.tray_sub_brands,  # ← FIXED: This is material sub-type, not brand!
+                            "sub_type": tray.tray_sub_brands,
                             "color": tray.tray_color,
                             "remain_percent": tray.remain_percent,
+                            "tray_weight": tray.tray_weight,
                             "tray_diameter": tray.tray_diameter,
                             "nozzle_temp_min": tray.nozzle_temp_min,
                             "nozzle_temp_max": tray.nozzle_temp_max,
-                            # NEW: Add RFID and state fields
-                            "tag_uid": tray.tag_uid,      # ← RFID unique identifier
-                            "state": tray.state,          # ← Tray state
-                            "tray_uuid": tray.tray_uuid,  # ← Tray UUID
+                            "tag_uid": tray.tag_uid,
+                            "state": tray.state,
+                            "tray_uuid": tray.tray_uuid,
+                            # Flow calibration
+                            "k": tray.k,
+                            "n": tray.n,
+                            "cali_idx": tray.cali_idx,
+                            # Filament capacity & profile
+                            "total_len": tray.total_len,
+                            "tray_info_idx": tray.tray_info_idx,
+                            "tray_time": tray.tray_time,
+                            "tray_bed_temp": tray.tray_bed_temp,
+                            "bed_temp_type": tray.bed_temp_type,
+                            "cols": tray.cols,
                         })
             snapshot["filaments"] = filaments
 
-            # AMS environment
+            # AMS units info (chip_id, humidity per unit, etc.)
+            ams_units = []
+            for unit in self.ams.units:
+                ams_units.append({
+                    "unit_id": unit.unit_id,
+                    "ams_id": unit.ams_id,
+                    "chip_id": unit.chip_id,
+                    "info": unit.info,
+                    "humidity": unit.humidity,
+                    "humidity_raw": unit.humidity_raw,
+                    "temp": unit.temp,
+                    "dry_time": unit.dry_time,
+                })
+            snapshot["ams_units"] = ams_units
+
+            # AMS environment (first unit for backwards compat)
             if self.ams.units:
                 snapshot["ams_humidity"] = self.ams.units[0].humidity
                 snapshot["ams_humidity_raw"] = self.ams.units[0].humidity_raw
